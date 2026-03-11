@@ -120,33 +120,33 @@ async def analyze(request: Request):
             memory = user_memory_manager.get_memory(chat_id, llm)
 
             rag_result = []
-            async for chunk in run_rag_analyzing(
-                text=user_prompt,
-                images=images,
-            ):
-                yield generate_sse_data(chunk)
-                if chunk == "loading: rag_searching \n\n":
-                    print("使用 RAG 搜索")
-                    # Retrieve RAG first
-                    if images:
-                        rag_result = await retrieveRAGResult(image=images[0])
-                    else:
+            filtered_rag_result = []
+
+            # 有图片时跳过 RAG，直接使用多模态模型 qwen2.5vl
+            if not images:
+                async for chunk in run_rag_analyzing(
+                    text=user_prompt,
+                    images=images,
+                ):
+                    yield generate_sse_data(chunk)
+                    if chunk == "loading: rag_searching \n\n":
+                        print("使用 RAG 搜索")
                         rag_result = await retrieveRAGResult(text=user_prompt)
 
-            rag_imgs = []
-            print("rag res: -----------", rag_result)
-            if len(rag_result) > 0:
-                for res in rag_result:
-                    print("rag result----------------", res)
-                    if res.get("image"):
-                        rag_imgs.append(res)
-            if len(rag_imgs) > 0:
-                yield generate_sse_data("**小羲从知识库检索到下列相关图片:** \n\n")
-                for img in rag_imgs:
-                    yield generate_sse_data(f"RAG image: {img['image']}, title: {img['title']} \n\n")
+                rag_imgs = []
+                print("rag res: -----------", rag_result)
+                if len(rag_result) > 0:
+                    for res in rag_result:
+                        print("rag result----------------", res)
+                        if res.get("image"):
+                            rag_imgs.append(res)
+                if len(rag_imgs) > 0:
+                    yield generate_sse_data("**小羲从知识库检索到下列相关图片:** \n\n")
+                    for img in rag_imgs:
+                        yield generate_sse_data(f"RAG image: {img['image']}, title: {img['title']} \n\n")
 
-            filtered_rag_result = [res for res in rag_result if not res.get("image")]
-            print("filtered rag res: ---------", filtered_rag_result)
+                filtered_rag_result = [res for res in rag_result if not res.get("image")]
+                print("filtered rag res: ---------", filtered_rag_result)
 
             try:
                 prompt = user_prompt
