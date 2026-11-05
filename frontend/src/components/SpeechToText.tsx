@@ -1,8 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useRef, useState } from "react";
-import voiceIcon from "../assets/voice.png";
-import voiceActiveIcon from "../assets/voice-active.png";
-import rotating_circle from "@/assets/rotating_circle.gif";
+import { LoaderCircle, Mic, MicOff } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { RecorderManager } from "@/index";
 
 import CryptoJS from "crypto-js"; // 用于生成签名
@@ -26,6 +25,7 @@ export const SpeechToText: React.FC<SpeechToTextProps> = ({
   onVoiceActive,
   onVoiceInActive
 }) => {
+  const { t } = useTranslation();
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [isWSActive, setIsWSActive] = useState(false);
   const recorderRef = useRef<any>(null);
@@ -198,32 +198,23 @@ export const SpeechToText: React.FC<SpeechToTextProps> = ({
   return (
     <>
       <VoiceWakeup onWakeup={handleWakeup} />
-      <div
-        className={`w-full h-full ${disabled ? "cursor-not-allowed" : ""}`}
-        onClick={handleToggle}
-      >
-        <Tooltip>
-          <TooltipTrigger>
-            <img
-              src={
-                isVoiceActive
-                  ? isWSActive
-                    ? voiceActiveIcon
-                    : rotating_circle
-                  : isWSActive
-                    ? rotating_circle
-                    : voiceIcon
-              }
-              alt="语音"
-              className="w-full h-full"
-            />
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>{isVoiceActive ? "关闭语音转换" : "开启语音转文字"}</p>
-          </TooltipContent>
-        </Tooltip>
-
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" className="chat-icon-button" onClick={handleToggle}
+            disabled={disabled} aria-pressed={isVoiceActive}
+            aria-label={t(isVoiceActive ? "chat.voiceStop" : "chat.voiceStart")}>
+            {isVoiceActive && !isWSActive
+              ? <LoaderCircle size={19} className="chat-icon-spin" aria-hidden="true" />
+              : isVoiceActive
+                ? <MicOff size={19} strokeWidth={1.7} aria-hidden="true" />
+                : <Mic size={19} strokeWidth={1.7} aria-hidden="true" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{t(isVoiceActive ? (isWSActive ? "chat.voiceStop" : "chat.voiceConnecting") : "chat.voiceStart")}</p>
+          <p>{t("chat.voiceHint")}</p>
+        </TooltipContent>
+      </Tooltip>
     </>
   );
 };

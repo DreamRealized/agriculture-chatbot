@@ -1,63 +1,57 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import imageIcon from "../assets/image.png";
-import imageActiveIcon from "../assets/image-active.png";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { ImagePlus, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type ImageUploaderProps = {
   onImagesChange: (images: string[]) => void;
   disabled?: boolean;
-  resetTrigger?: boolean; // New prop to trigger reset
+  resetTrigger?: boolean;
 };
 
 export const ImageUploader = ({
   onImagesChange,
   disabled = false,
-  resetTrigger = false // Default value
+  resetTrigger = false,
 }: ImageUploaderProps) => {
+  const { t } = useTranslation();
   const [images, setImages] = useState<string[]>([]);
+  const [readError, setReadError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isImageActive, setIsImageActive] = useState(false);
 
-  // Reset when resetTrigger changes
   useEffect(() => {
     if (resetTrigger) {
       setImages([]);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""; // Clear the file input
-      }
+      setReadError(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }, [resetTrigger]);
 
   const handleImageUpload = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (!files) return;
-
-      const newImages: string[] = [];
-      const readers = Array.from(files).map(file => {
-        const reader = new FileReader();
-        return new Promise<string>(resolve => {
-          reader.onload = event => {
-            if (event.target?.result) {
-              newImages.push(event.target.result as string);
-              resolve(event.target.result as string);
-            }
-          };
-          reader.readAsDataURL(file);
-        });
-      });
-
-      Promise.all(readers).then(() => {
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = event.target.files;
+      if (!files || disabled) return;
+      setReadError(false);
+      try {
+        const newImages = await Promise.all(Array.from(files).map(file => (
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => typeof reader.result === "string"
+              ? resolve(reader.result) : reject(new Error("Invalid image data"));
+            reader.onerror = () => reject(reader.error);
+            reader.onabort = () => reject(new Error("Image read aborted"));
+            reader.readAsDataURL(file);
+          })
+        )));
         const updatedImages = [...images, ...newImages];
         setImages(updatedImages);
         onImagesChange(updatedImages);
-      });
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } catch {
+        setReadError(true);
+      }
     },
-    [images, onImagesChange]
+    [disabled, images, onImagesChange],
   );
 
   const removeImage = (index: number) => {
@@ -67,68 +61,35 @@ export const ImageUploader = ({
   };
 
   return (
-    <div className="flex gap-2">
-      <div className="flex flex-wrap gap-2">
-        {images.map((img, index) => (
-          <div key={index} className="relative">
-            <img
-              src={img}
-              alt={`Uploaded ${index}`}
-              className="w-8 h-8 object-cover rounded"
-            />
-            {!disabled && (
-              <div
-                onClick={() => removeImage(index)}
-                className="absolute -top-2 -right-2 bg-red-500! text-white rounded-full w-3 h-3 flex items-center justify-center text-xs cursor-pointer"
-                aria-label="Remove image"
-              >
-                ×
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      <div
-        className="relative w-8 h-8 cursor-pointer"
-        onClick={() => {
-          setIsImageActive(!isImageActive);
-          fileInputRef.current?.click();
-          setTimeout(() => {
-            setIsImageActive(false);
-          }, 200);
-        }}
-      >
-        <Tooltip>
-          <TooltipTrigger>
-            <img
-              src={isImageActive ? imageActiveIcon : imageIcon}
-              alt="上传图片"
-              className="w-full h-full"
-            />
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>上传图片</p>
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      <input
-        ref={fileInputRef}
-        style={{ display: "none" }}
-        type="file"
-        accept="image/*"
-        multiple
-        onChange={handleImageUpload}
-        disabled={disabled}
-        className={`block w-full text-sm text-gray-500
-          file:mr-4 file:py-2 file:px-4
-          file:rounded-md file:border-0
-          file:text-sm file:font-semibold
-          ${disabled
-            ? "file:bg-gray-200 file:text-gray-500"
-            : "file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-          }
-          ${disabled ? "cursor-not-allowed" : ""}`}
-      />
+    <div className="chat-upload-control">
+      {images.map((image, index) => (
+        <div key={index} className="chat-upload-preview">
+          <img src={image} alt={t("chat.attachment", { number: index + 1 })} />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="chat-remove-image" disabled={disabled}
+                aria-label={t("chat.removeImage", { number: index + 1 })}
+                onClick={() => removeImage(index)}>
+                <X size={12} aria-hidden="true" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("chat.removeImage", { number: index + 1 })}</TooltipContent>
+          </Tooltip>
+        </div>
+      ))}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" className="chat-icon-button" disabled={disabled}
+            aria-label={t("chat.file_uploader_title")}
+            onClick={() => fileInputRef.current?.click()}>
+            <ImagePlus size={19} strokeWidth={1.7} aria-hidden="true" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t("chat.file_uploader_title")}</TooltipContent>
+      </Tooltip>
+      <input ref={fileInputRef} type="file" accept="image/*" multiple
+        onChange={handleImageUpload} disabled={disabled} hidden />
+      {readError && <span className="chat-control-error" role="alert">{t("chat.uploadError")}</span>}
     </div>
   );
 };
