@@ -2,6 +2,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 
+from env import ENABLE_MCP, ENABLE_RAG, OLLAMA_TEXT_MODEL
 from utils.load_config import load_config
 
 # Load all global configs
@@ -12,19 +13,25 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from mcp_plugins.mcp_stream import get_mcp_client
-from mcp_plugins.postgres_mcp import run_postgres_mcp_tool
-from utils.memory import WindowedSummaryMemory
 from utils.models import generate_with_ollama_stream
-from utils.promptsArchive import (get_agriculture_prompt_with_image,
-                                  get_agriculture_prompt_without_image)
+from utils.promptsArchive import (get_general_image_prompt,
+                                  get_general_text_prompt)
 from utils.user_memory import UserMemoryManager
-from utils.utils import (generate_sse_data, should_apply_enhanced_prompt,
+from utils.utils import (generate_sse_data,
                          should_use_mcp_plugin)
-from rag.rag import run_rag_analyzing, retrieveRAGResult
+if ENABLE_MCP:
+    from mcp_plugins.mcp_stream import get_mcp_client
+    from mcp_plugins.postgres_mcp import run_postgres_mcp_tool
+
+if ENABLE_RAG:
+    from rag.rag import run_rag_analyzing, retrieveRAGResult
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if not ENABLE_MCP:
+        yield
+        return
+
     client = get_mcp_client()
     # 异步上下文管理客户端连接
     async with client:
@@ -78,26 +85,15 @@ def generate_qwenvl_prompt(query: str, memory, rag_result: list[str] = []):
     history = memory.load_memory_variables({}).get("history", "")
 
     # 构造文本内容
-    prompt_text = get_agriculture_prompt_with_image(query, history, rag_result)
+    prompt_text = get_general_image_prompt(query, history)
 
     # 返回标准 message 列表（用于模型调用）
     return prompt_text
 
 
-def generate_qwen3_prompt(
-    prompt: str,
-    memory: WindowedSummaryMemory,
-    rag_result: list[str],
-) -> str:
-    history = memory.load_memory_variables({}).get("history", "")
-    generated_prompt = get_agriculture_prompt_without_image(
-        history, prompt, rag_result
-    )
-    return generated_prompt
-
 @app.get("/clean_context/{chat_id}")
 async def clean_context(chat_id: str):
-    user_memory_manager.clean_memory(chat_id, "qwen3:32b")
+    user_memory_manager.clean_memory(chat_id, OLLAMA_TEXT_MODEL)
     user_memory_manager.clean_memory(chat_id, "qwen2.5vl:7b")
     return
 
@@ -116,14 +112,14 @@ async def analyze(request: Request):
             # Select model based on input
             # Keep the qwen instance temporarily
             # llm = qwen_model if images else qwen3_model
-            llm = "qwen3:32b"
+            llm = OLLAMA_TEXT_MODEL
             memory = user_memory_manager.get_memory(chat_id, llm)
 
             rag_result = []
             filtered_rag_result = []
 
             # 有图片时跳过 RAG，直接使用多模态模型 qwen2.5vl
-            if not images:
+            if ENABLE_RAG and not images:
                 async for chunk in run_rag_analyzing(
                     text=user_prompt,
                     images=images,
@@ -141,7 +137,7 @@ async def analyze(request: Request):
                         if res.get("image"):
                             rag_imgs.append(res)
                 if len(rag_imgs) > 0:
-                    yield generate_sse_data("**小羲从知识库检索到下列相关图片:** \n\n")
+                    yield generate_sse_data("**从知识库检索到下列相关图片:** \n\n")
                     for img in rag_imgs:
                         yield generate_sse_data(f"RAG image: {img['image']}, title: {img['title']} \n\n")
 
@@ -155,7 +151,7 @@ async def analyze(request: Request):
                     prompt = generate_qwenvl_prompt(user_prompt, memory, filtered_rag_result)
                 else:
                     postgres_mcp_context: list[str] = []
-                    if should_use_mcp_plugin(user_prompt):
+                    if ENABLE_MCP and should_use_mcp_plugin(user_prompt):
                         print("should use mcp----------")
                         async for item in run_postgres_mcp_tool(
                             user_prompt, postgres_mcp_context, filtered_rag_result
@@ -167,17 +163,15 @@ async def analyze(request: Request):
                         )
                         yield 'data: {"type": "done"}\n\n'
                         return
-                    elif should_apply_enhanced_prompt(user_prompt):
-                        print("should use enhanced prompt----------")
-                        prompt = generate_qwen3_prompt(
-                            prompt=user_prompt,
-                            memory=memory,
-                            rag_result=filtered_rag_result
-                        )
+                    prompt = get_general_text_prompt(
+                        query=user_prompt,
+                        history=memory.load_memory_variables({}).get("history", []),
+                        rag_result=filtered_rag_result,
+                    )
                 print("prompt------------------", prompt)
                 inside_think = False
                 async for chunk in generate_with_ollama_stream(
-                    model="qwen2.5vl:7b" if images else "qwen3:32b",
+                    model="qwen2.5vl:7b" if images else OLLAMA_TEXT_MODEL,
                     prompt=prompt,
                     image=images,
                 ):
