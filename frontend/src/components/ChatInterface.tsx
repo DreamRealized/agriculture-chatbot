@@ -36,7 +36,7 @@ export const ChatInterface = ({
   const { t } = useTranslation();
   const savedMessagesRef = useRef<Set<string>>(new Set());
   const [targetDB, setTargetDB] = useState("");
-  const default_chat_id = useMemo(() => `chat_${Date.now()}`, [])
+  const conversationId = useMemo(() => `chat_${Date.now()}`, [])
   const { addToAudioQueue, flushBuffer, clearQueue } = useAudioPlayer()
 
   // Auto-scroll to bottom when messages change
@@ -106,7 +106,7 @@ export const ChatInterface = ({
         {
           prompt: input,                    // ✅ 发送原始用户输入
           images: userMessage.images,      // ✅ 发送图片
-          chat_id: userMessageId || default_chat_id,    // ✅ 使用返回的chat_id
+          chat_id: conversationId, // Keep backend memory stable across message IDs.
           targetDB: targetDB
         },
         (data) => {
@@ -352,7 +352,7 @@ export const ChatInterface = ({
             <div
               className="w-8 h-8 flex items-center justify-center cursor-pointer text-white"
             >
-              <CleanContextBtn cleanContext={cleanContext} chatId={default_chat_id} />
+              <CleanContextBtn cleanContext={cleanContext} chatId={conversationId} />
             </div>
 
             <div

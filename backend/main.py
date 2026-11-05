@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from utils.models import generate_with_ollama_stream
-from utils.promptsArchive import (get_agriculture_prompt_with_image,
+from utils.promptsArchive import (get_general_image_prompt,
                                   get_general_text_prompt)
 from utils.user_memory import UserMemoryManager
 from utils.utils import (generate_sse_data,
@@ -85,7 +85,7 @@ def generate_qwenvl_prompt(query: str, memory, rag_result: list[str] = []):
     history = memory.load_memory_variables({}).get("history", "")
 
     # 构造文本内容
-    prompt_text = get_agriculture_prompt_with_image(query, history, rag_result)
+    prompt_text = get_general_image_prompt(query, history)
 
     # 返回标准 message 列表（用于模型调用）
     return prompt_text

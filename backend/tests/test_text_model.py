@@ -112,6 +112,52 @@ class TextModelTests(unittest.TestCase):
             memory = main.user_memory_manager.get_memory("mcp", main.OLLAMA_TEXT_MODEL)
             self.assertEqual(memory.history[0]["output"], "tool answer")
 
+    def test_image_conversation_history_and_followups(self):
+        calls = []
+        async def fake_ollama(**kwargs):
+            calls.append(kwargs)
+            yield {"response": "The chart shows purple bars.", "done": False}
+            yield {"done": True}
+        manager = UserMemoryManager()
+        with contextlib.ExitStack() as stack:
+            for name, value in dict(ENABLE_MCP=False, ENABLE_RAG=False,
+                                    user_memory_manager=manager,
+                                    generate_with_ollama_stream=fake_ollama).items():
+                stack.enter_context(patch.object(main, name, value))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            client = stack.enter_context(TestClient(main.app))
+            def send(prompt, images=None, chat_id="image-chat"):
+                response = client.post("/analyze", json={"prompt": prompt, "images": images or [], "chat_id": chat_id})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("text/event-stream", response.headers["content-type"])
+                self.assertIn('"type": "delta"', response.text)
+                self.assertIn('"type": "done"', response.text)
+                return calls[-1]
+            send("Please answer briefly.")
+            image_call = send("Explain this chart.", ["unique-base64-image-bytes"])
+            self.assertEqual(image_call["model"], "qwen2.5vl:7b")
+            self.assertEqual(image_call["image"], ["unique-base64-image-bytes"])
+            self.assertEqual(image_call["prompt"].count("Please answer briefly."), 1)
+            self.assertEqual(image_call["prompt"].count("Conversation history:"), 1)
+            self.assertIn("documents, screenshots, charts", image_call["prompt"])
+            self.assertIn("Do not invent details", image_call["prompt"])
+            self.assertNotIn("农业专家", image_call["prompt"])
+            followup = send("What color were the bars?")
+            self.assertEqual(followup["model"], main.OLLAMA_TEXT_MODEL)
+            self.assertEqual(followup["image"], [])
+            self.assertEqual(followup["prompt"].count("Explain this chart."), 1)
+            self.assertIn("The chart shows purple bars.", followup["prompt"])
+            memory = manager.get_memory("image-chat", main.OLLAMA_TEXT_MODEL)
+            self.assertNotIn("unique-base64-image-bytes", str(memory.history))
+            isolated = send("What is shown?", ["other-image"], "separate-chat")
+            self.assertNotIn("Explain this chart.", isolated["prompt"])
+            self.assertNotIn("purple bars", isolated["prompt"])
+            self.assertEqual(client.get("/clean_context/image-chat").status_code, 200)
+            self.assertEqual(memory.history, [])
+            cleared = send("Explain this new image.", ["new-image"])
+            self.assertNotIn("Conversation history:", cleared["prompt"])
+            self.assertNotIn("purple bars", cleared["prompt"])
+
     def test_streaming_memory_and_images(self):
         calls = []
         async def fake_ollama(**kwargs):
