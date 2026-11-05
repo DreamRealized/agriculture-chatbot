@@ -1,7 +1,7 @@
-# 🌾 Agriculture Assistant — Backend
+# General Chatbot MVP — Backend
 
-FastAPI backend for streaming text and image chat with Ollama, agricultural
-prompts, and conversation memory. RAG retrieval and MCP database tools are
+FastAPI backend for general-purpose text chat, streaming responses, conversation
+memory, and existing image support through Ollama. RAG retrieval and MCP database tools are
 optional and **disabled by default**.
 
 ## Local setup
@@ -90,3 +90,23 @@ not contacted by startup or chat requests. Each flag operates independently.
 - `utils/promptsArchive.py`: existing prompt templates.
 - `rag/rag.py`: optional retrieval integration.
 - `mcp_plugins/`: optional MCP client and database tools.
+
+## General text conversations
+
+Every ordinary text request uses a neutral general-purpose prompt, including
+messages containing former agriculture trigger keywords. Prior conversation
+turns are included exactly once; reuse the same `chat_id` across turns. Memory
+is held in process and resets when the backend restarts.
+
+When RAG is explicitly enabled, retrieved text is supplied as reference material
+for the assistant to use when relevant. Enabled MCP routes still take precedence
+for matching database queries. Existing RAG topics, MCP database schemas and
+keywords, and their specialized prompts remain unchanged. Image requests retain
+the agricultural image template and `qwen2.5vl:7b` model. Legacy agricultural
+text templates remain available but are no longer selected by ordinary text chat.
+
+Run backend regression tests from `backend/`:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+```
