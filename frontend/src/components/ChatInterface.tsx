@@ -1,13 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import type { Message } from "@/types/types";
-import { generateResponse } from "@/lib/ollamaService";
+import { generateResponse, sendCleanContextRequest } from "@/lib/ollamaService";
 import { ImageUploader } from "./ImageUploader";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { useTranslation } from "react-i18next";
-import chatBg from "../assets/chat-bg.png";
-import botAvatar from "../assets/bot-avatar.png";
-import textBg from "../assets/text-bg.png";
-import sendBg from "../assets/send-bg.png";
+import { ArrowUp, MessageSquare, Plus, Square } from "lucide-react";
 import { saveUserMessage, saveAIResponse, getPromptVersion } from "@/lib/managementApi";
 import { logError } from "@/lib/logService";
 import { SpeechToText } from "./SpeechToText.tsx"
@@ -33,11 +30,28 @@ export const ChatInterface = ({
   const [shouldResetImages, setShouldResetImages] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const isChinese = i18n.language.startsWith("zh");
+  const copy = {
+    newChat: t("chat.newChat"), heading: t("chat.welcome"), subtitle: t("chat.welcomeSubtitle"),
+    language: t("chat.language"), you: t("chat.you"), assistant: t("chat.assistant"),
+    clearing: t("chat.clearing"), hint: t("chat.composerHint"), clearError: t("chat.clearError"),
+  };
+  const [isResetting, setIsResetting] = useState(false);
+  const focusAfterResetRef = useRef(false);
+  const [resetError, setResetError] = useState("");
   const savedMessagesRef = useRef<Set<string>>(new Set());
   const [targetDB, setTargetDB] = useState("");
   const conversationId = useMemo(() => `chat_${Date.now()}`, [])
   const { addToAudioQueue, flushBuffer, clearQueue } = useAudioPlayer()
+
+  // Restore focus after React has re-enabled the composer following New Chat.
+  useEffect(() => {
+    if (!isResetting && focusAfterResetRef.current) {
+      focusAfterResetRef.current = false;
+      inputRef.current?.focus();
+    }
+  }, [isResetting]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -93,8 +107,8 @@ export const ChatInterface = ({
       const userMessageId = savedUserMessage?.message_id;
 
       if (!userMessageId) {
-        const error = new Error("保存用户消息失败");
-        logError("保存用户消息失败", error, {
+        const error = new Error(t("chat.saveMessageError"));
+        logError(t("chat.saveMessageError"), error, {
           model: modelToUse,
           message_length: input.length
         });
@@ -131,7 +145,7 @@ export const ChatInterface = ({
           setMessages(prev => [
             ...prev,
             {
-              text: `Error: ${error.message}`,
+              text: t("chat.error", { message: error.message }),
               sender: "ai",
               isComplete: true
             }
@@ -179,7 +193,7 @@ export const ChatInterface = ({
       setMessages(prev => [
         ...prev.slice(0, -1), // 移除未完成的AI消息
         {
-          text: `发送失败: ${error instanceof Error ? error.message : '未知错误'}`,
+          text: t("chat.sendError", { message: error instanceof Error ? error.message : t("chat.unknownError") }),
           sender: "ai",
           isComplete: true
         }
@@ -208,7 +222,7 @@ export const ChatInterface = ({
       setMessages(prev => [
         ...prev.slice(0, -1), // 移除未完成的AI消息
         {
-          text: `请求已中断, 欢迎再次向我提问.`,
+          text: t("chat.stopped"),
           sender: "ai",
           isComplete: true
         }
@@ -223,169 +237,137 @@ export const ChatInterface = ({
     }
   };
 
-  // 使用React.memo + 自定义arePropsEqual
   const MemoizedMessage = React.memo(({ msg }: { msg: Message }) => (
-    <div className={`mb-6 ${msg.sender === "user" ? "flex justify-end" : "flex justify-start"}`}>
-      {msg.sender === "ai" && (
-        <img src={botAvatar} className="w-10 h-10 mr-2" alt="AI" />
-      )}
-      <div
-        style={{
-          background: "rgba(17, 96, 73, 0.40)",
-          borderRadius: "4px",
-          padding: "10px",
-          maxWidth: "80%",
-          color: "#D7ECFF"
-        }}
-      >
+    <article className={`chat-message chat-message--${msg.sender}`} aria-label={msg.sender === "user" ? copy.you : copy.assistant}>
+      <div className="chat-message-body">
+        {msg.images && msg.images.length > 0 && (
+          <div className="chat-message-images">
+            {msg.images.map((image, index) => (
+              <img key={index} src={image} alt={t("chat.attachment", { number: index + 1 })} />
+            ))}
+          </div>
+        )}
         <MarkdownRenderer content={msg.text} />
       </div>
-    </div>
-  ), (prev, next) => {
-    // 深度比较（假设msg是immutable）
-    return prev.msg.text === next.msg.text
-      && prev.msg.sender === next.msg.sender;
-  });
+    </article>
+  ));
 
   const cleanContext = React.useCallback(() => {
     setMessages([])
   }, [])
 
+  const startNewChat = async () => {
+    if (isLoading || isResetting) return;
+    setIsResetting(true);
+    setResetError("");
+    try {
+      await sendCleanContextRequest(conversationId);
+      cleanContext();
+      setInput("");
+      setShouldResetImages(true);
+      setTargetDB("");
+      clearQueue();
+      focusAfterResetRef.current = true;
+    } catch {
+      setResetError(copy.clearError);
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const newChatButton = (
+    <button type="button" className="chat-new-button" onClick={startNewChat} disabled={isLoading || isResetting}>
+      <Plus size={18} aria-hidden="true" />
+      <span>{isResetting ? copy.clearing : copy.newChat}</span>
+    </button>
+  );
+
   return (
-    <div className="w-screen bg-[#1a1a1a] min-h-screen flex items-center justify-center">
-      <div
-        className="relative w-full h-[100vh] sm:h-[747px] flex flex-col max-w-[680px]"
-        style={{
-          backgroundImage: `url(${chatBg})`,
-          backgroundSize: "100% 100%",
-          backgroundPosition: "center",
-          backgroundRepeat: "no-repeat"
-        }}
-      >
-        {/* <img */}
-        {/*   src={robotPng} */}
-        {/*   className="absolute bottom-[0] left-[-200px] w-[180px]" */}
-        {/* /> */}
-        <div className="w-full h-[45px] flex items-center justify-between px-8 flex-shrink-0">
-          <span className="chat-title">AI智能决策</span>
-        </div>
-        <div className="flex-1 overflow-y-auto px-4 py-2 mx-2">
-          <div className="flex items-start gap-3 text-gray-400">
-            <img src={botAvatar} className="w-10 h-10" alt="AI" />
-            <div
-              className="mb-6"
-              style={{
-                background: "rgba(17, 96, 73, 0.40)",
-                borderRadius: "4px",
-                padding: "10px",
-                maxWidth: "80%",
-                color: "#D7ECFF"
-              }}
-            >
-              您好啊！！我是
-              <span style={{ color: "#d6a130" }}>
-                人工智能农业模拟器--"小羲"
-              </span>
-              。我可以为您解答相关农业方面农技、农艺问题，您可以在下方输入框内输入想要提问的问题！！！也可以点击麦克风语音识别！！！很高兴为您服务！！！
-            </div>
-          </div>
-          {messages.map((msg, i) => (
-            <MemoizedMessage key={i} msg={msg} />
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
+    <div className="chat-app">
+      <aside className="chat-sidebar" aria-label="AI Chat">
+        <div className="chat-brand"><MessageSquare size={21} strokeWidth={1.6} aria-hidden="true" /><span>AI Chat</span></div>
+        {newChatButton}
+      </aside>
 
-        <div
-          className="flex flex-col gap-2 m-4 flex-shrink-0"
-          style={{
-            backgroundImage: `url(${textBg})`,
-            backgroundSize: "100% 100%",
-            backgroundPosition: "center",
-            backgroundRepeat: "no-repeat",
-            padding: "8px 4px"
-          }}
-        >
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyPress}
-            placeholder={t(
-              images.length > 0 ? "chat.file_placeholder" : "chat.placeholder"
-            )}
-            className="w-full p-3 bg-transparent text-white placeholder-gray-400 focus:outline-none resize-none"
-            disabled={isLoading}
-            rows={2}
-            style={{
-              opacity: 1,
-              pointerEvents: "auto"
-            }}
-          />
+      <main className="chat-main">
+        <header className="chat-header">
+          <span className="chat-header-title">AI Chat</span>
+          <div className="chat-mobile-new">{newChatButton}</div>
+          <select
+            className="chat-language"
+            aria-label={copy.language}
+            value={isChinese ? "zh" : "en"}
+            onChange={event => { void i18n.changeLanguage(event.target.value); }}
+          >
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+          </select>
+        </header>
 
-          <div className="flex items-center justify-end gap-2 mt-2">
-            <ImageUploader
-              onImagesChange={imgs => {
-                setImages(imgs);
-              }}
-              disabled={isLoading}
-              resetTrigger={shouldResetImages}
-            />
-            <div
-              className="w-8 h-8 flex items-center justify-center cursor-pointer"
-            >
-              <SpeechToText
-                disabled={isLoading}
-                afterTranslate={(str) => {
-                  setInput((prev) => {
-                    return prev + str
-                  })
-                }}
-                onVoiceInActive={() => {
-                  const timeout = setTimeout(() => {
-                    sendMessage();
-                    clearTimeout(timeout);
-                  }, 500);
-                }}
-              ></SpeechToText>
-            </div>
-
-            <div
-              className="w-8 h-8 flex items-center justify-center cursor-pointer text-white"
-            >
-              <CleanContextBtn cleanContext={cleanContext} chatId={conversationId} />
-            </div>
-
-            <div
-              className="relative"
-              style={{
-                backgroundImage: `url(${sendBg})`,
-                backgroundSize: "100% 100%",
-                backgroundPosition: "center",
-                backgroundRepeat: "no-repeat"
-              }}
-            >
-              <div
-                onClick={
-                  isLoading
-                    ? stopGeneration
-                    : !input.trim()
-                      ? undefined
-                      : sendMessage
-                }
-                className={`px-4 h-8 font-medium cursor-pointer ${isLoading
-                  ? "text-red-500"
-                  : !input.trim()
-                    ? "text-gray-400 cursor-not-allowed"
-                    : "text-white hover:opacity-80"
-                  }`}
-                style={{ lineHeight: "32px" }}
-              >
-                {isLoading ? t("chat.stop") : t("chat.send")}
+        <div className="chat-scroll">
+          <div className={`chat-transcript ${messages.length === 0 ? "chat-transcript--empty" : ""}`}>
+            {messages.length === 0 && (
+              <div className="chat-empty">
+                <h1>{copy.heading}</h1>
+                <p>{copy.subtitle}</p>
               </div>
-            </div>
+            )}
+            {messages.map((msg, index) => <MemoizedMessage key={index} msg={msg} />)}
+            <div ref={messagesEndRef} />
           </div>
         </div>
-      </div>
+
+        <div className="chat-composer-region">
+          {resetError && <p className="chat-error" role="alert">{resetError}</p>}
+          <div className="chat-composer">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={event => setInput(event.target.value)}
+              onKeyDown={handleKeyPress}
+              placeholder={t(images.length > 0 ? "chat.file_placeholder" : "chat.placeholder")}
+              aria-label={t(images.length > 0 ? "chat.file_placeholder" : "chat.placeholder")}
+              disabled={isLoading || isResetting}
+              rows={2}
+            />
+            <div className="chat-composer-toolbar">
+              <div className="chat-composer-tools">
+                <ImageUploader
+                  onImagesChange={imgs => setImages(imgs)}
+                  disabled={isLoading || isResetting}
+                  resetTrigger={shouldResetImages}
+                />
+                <div className="chat-tool">
+                  <SpeechToText
+                    disabled={isLoading || isResetting}
+                    afterTranslate={str => setInput(prev => prev + str)}
+                    onVoiceInActive={() => {
+                      const timeout = setTimeout(() => {
+                        sendMessage();
+                        clearTimeout(timeout);
+                      }, 500);
+                    }}
+                  />
+                </div>
+                <div className="chat-tool" inert={isLoading || isResetting}>
+                  <CleanContextBtn cleanContext={cleanContext} chatId={conversationId} disabled={isLoading || isResetting} />
+                </div>
+              </div>
+              <button
+                type="button"
+                className="chat-send-button"
+                onClick={isLoading ? stopGeneration : sendMessage}
+                disabled={isResetting || (!isLoading && !input.trim())}
+                aria-label={isLoading ? t("chat.stop") : t("chat.send")}
+                title={isLoading ? t("chat.stop") : t("chat.send")}
+              >
+                {isLoading ? <Square size={15} fill="currentColor" aria-hidden="true" /> : <ArrowUp size={21} aria-hidden="true" />}
+              </button>
+            </div>
+          </div>
+          <p className="chat-composer-hint">{copy.hint}</p>
+        </div>
+      </main>
     </div>
   );
 };

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useRef, useState } from "react";
 import pinyin from "pinyin";
+import { useTranslation } from "react-i18next";
 
 interface VoiceWakeupProps {
   onWakeup: () => void;
@@ -9,8 +10,9 @@ interface VoiceWakeupProps {
 
 export const VoiceWakeup: React.FC<VoiceWakeupProps> = ({
   onWakeup,
-  wakeupKeyword = "小羲小羲"
+  wakeupKeyword = "你好助手"
 }) => {
+  const { t, i18n } = useTranslation();
   const [isListening, setIsListening] = useState(false);
   const [isPaused, setIsPaused] = useState(false); // 新增：用于控制是否暂停唤醒检测
   const recognitionRef = useRef<any>(null);
@@ -99,8 +101,8 @@ export const VoiceWakeup: React.FC<VoiceWakeupProps> = ({
         recognition.stop();
 
         if ("speechSynthesis" in window) {
-          const speech = new SpeechSynthesisUtterance("我在！请说出你的问题");
-          speech.lang = "zh-CN";
+          const speech = new SpeechSynthesisUtterance(t("chat.voiceReady"));
+          speech.lang = i18n.language.startsWith("zh") ? "zh-CN" : "en-US";
           speech.rate = 1;
           speech.pitch = 1;
           speech.volume = 1;
@@ -217,7 +219,7 @@ export const VoiceWakeup: React.FC<VoiceWakeupProps> = ({
         clearTimeout(restartTimeoutRef.current);
       }
     };
-  }, [onWakeup, wakeupKeyword, isPaused]); // 添加 isPaused 作为依赖
+  }, [onWakeup, wakeupKeyword, isPaused, t, i18n.language]); // 添加 isPaused 作为依赖
 
   const startListening = () => {
     try {
