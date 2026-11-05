@@ -13,12 +13,11 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from utils.memory import WindowedSummaryMemory
 from utils.models import generate_with_ollama_stream
 from utils.promptsArchive import (get_agriculture_prompt_with_image,
-                                  get_agriculture_prompt_without_image)
+                                  get_general_text_prompt)
 from utils.user_memory import UserMemoryManager
-from utils.utils import (generate_sse_data, should_apply_enhanced_prompt,
+from utils.utils import (generate_sse_data,
                          should_use_mcp_plugin)
 if ENABLE_MCP:
     from mcp_plugins.mcp_stream import get_mcp_client
@@ -92,17 +91,6 @@ def generate_qwenvl_prompt(query: str, memory, rag_result: list[str] = []):
     return prompt_text
 
 
-def generate_qwen3_prompt(
-    prompt: str,
-    memory: WindowedSummaryMemory,
-    rag_result: list[str],
-) -> str:
-    history = memory.load_memory_variables({}).get("history", "")
-    generated_prompt = get_agriculture_prompt_without_image(
-        history, prompt, rag_result
-    )
-    return generated_prompt
-
 @app.get("/clean_context/{chat_id}")
 async def clean_context(chat_id: str):
     user_memory_manager.clean_memory(chat_id, OLLAMA_TEXT_MODEL)
@@ -149,7 +137,7 @@ async def analyze(request: Request):
                         if res.get("image"):
                             rag_imgs.append(res)
                 if len(rag_imgs) > 0:
-                    yield generate_sse_data("**小羲从知识库检索到下列相关图片:** \n\n")
+                    yield generate_sse_data("**从知识库检索到下列相关图片:** \n\n")
                     for img in rag_imgs:
                         yield generate_sse_data(f"RAG image: {img['image']}, title: {img['title']} \n\n")
 
@@ -175,22 +163,11 @@ async def analyze(request: Request):
                         )
                         yield 'data: {"type": "done"}\n\n'
                         return
-                    elif should_apply_enhanced_prompt(user_prompt):
-                        print("should use enhanced prompt----------")
-                        prompt = generate_qwen3_prompt(
-                            prompt=user_prompt,
-                            memory=memory,
-                            rag_result=filtered_rag_result
-                        )
-                    else:
-                        # Enhanced templates already include history; plain text needs it here.
-                        history = memory.load_memory_variables({}).get("history", [])
-                        if history:
-                            turns = "\n\n".join(
-                                f"User: {turn['input']}\nAssistant: {turn['output']}"
-                                for turn in history
-                            )
-                            prompt = f"Conversation history:\n{turns}\n\nCurrent request:\n{prompt}"
+                    prompt = get_general_text_prompt(
+                        query=user_prompt,
+                        history=memory.load_memory_variables({}).get("history", []),
+                        rag_result=filtered_rag_result,
+                    )
                 print("prompt------------------", prompt)
                 inside_think = False
                 async for chunk in generate_with_ollama_stream(

@@ -38,8 +38,8 @@ class TextModelTests(unittest.TestCase):
             self.assertEqual(inspect.signature(helper).parameters["model"].default, OLLAMA_TEXT_MODEL)
 
     def test_two_turn_history_reaches_ollama(self):
-        for enhanced in (False, True):
-            with self.subTest(enhanced=enhanced), contextlib.ExitStack() as stack:
+        for prefix in ("", "河北种植畜牧虫害害虫防治："):
+            with self.subTest(prefix=prefix), contextlib.ExitStack() as stack:
                 calls = []
                 async def fake_ollama(**kwargs):
                     calls.append(kwargs)
@@ -48,18 +48,19 @@ class TextModelTests(unittest.TestCase):
                 manager = UserMemoryManager()
                 for name, value in dict(ENABLE_RAG=False, ENABLE_MCP=False,
                                         user_memory_manager=manager,
-                                        should_apply_enhanced_prompt=lambda _: enhanced,
                                         generate_with_ollama_stream=fake_ollama).items():
                     stack.enter_context(patch.object(main, name, value))
                 stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                 client = stack.enter_context(TestClient(main.app))
-                first = "My favorite color is purple. Please remember it."
+                first = prefix + "My favorite color is purple. Please remember it."
                 second = "What is my favorite color?"
                 for prompt in (first, second):
                     response = client.post("/analyze", json={"prompt": prompt, "chat_id": "memory-test-1"})
                     self.assertEqual(response.status_code, 200)
                     self.assertIn('"type": "done"', response.text)
                 self.assertNotIn("Conversation history:", calls[0]["prompt"])
+                self.assertIn("helpful general-purpose assistant", calls[0]["prompt"])
+                self.assertNotIn("农业专家小羲", calls[0]["prompt"])
                 self.assertEqual(calls[1]["prompt"].count(first), 1)
                 self.assertEqual(calls[1]["prompt"].count("I will remember purple."), 1)
                 self.assertIn(second, calls[1]["prompt"])
@@ -70,6 +71,46 @@ class TextModelTests(unittest.TestCase):
                 client.get("/clean_context/memory-test-1")
                 client.post("/analyze", json={"prompt": second, "chat_id": "memory-test-1"})
                 self.assertNotIn("purple", calls[-1]["prompt"])
+
+    def test_optional_rag_context_and_mcp_routing(self):
+        calls = []
+        tool_calls = []
+        async def fake_ollama(**kwargs):
+            calls.append(kwargs)
+            yield {"response": "answer", "done": False}
+            yield {"done": True}
+        async def fake_analysis(**kwargs):
+            yield "loading: rag_searching \n\n"
+        async def fake_retrieve(**kwargs):
+            return [{"text": "reference-fact"},
+                    {"image": "reference.png", "title": "reference image"}]
+        async def fake_tool(query, context, rag_result):
+            tool_calls.append((query, rag_result))
+            yield "tool answer"
+        with contextlib.ExitStack() as stack:
+            for name, value in dict(ENABLE_MCP=False, ENABLE_RAG=True,
+                                    user_memory_manager=UserMemoryManager(),
+                                    generate_with_ollama_stream=fake_ollama,
+                                    run_rag_analyzing=fake_analysis,
+                                    retrieveRAGResult=fake_retrieve,
+                                    run_postgres_mcp_tool=fake_tool).items():
+                stack.enter_context(patch.object(main, name, value, create=True))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            client = stack.enter_context(TestClient(main.app))
+            response = client.post("/analyze", json={"prompt": "Summarize the reference", "chat_id": "rag"})
+            self.assertIn('"type": "done"', response.text)
+            self.assertIn("reference-fact", calls[-1]["prompt"])
+            self.assertNotIn("reference.png", calls[-1]["prompt"])
+            self.assertIn("reference.png", response.text)
+            self.assertNotIn("小羲", response.text)
+            with patch.object(main, "ENABLE_MCP", True), patch.object(main, "should_use_mcp_plugin", return_value=True):
+                response = client.post("/analyze", json={"prompt": "database query", "chat_id": "mcp"})
+            self.assertIn("tool answer", response.text)
+            self.assertIn('"type": "done"', response.text)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(tool_calls, [("database query", [{"text": "reference-fact"}])])
+            memory = main.user_memory_manager.get_memory("mcp", main.OLLAMA_TEXT_MODEL)
+            self.assertEqual(memory.history[0]["output"], "tool answer")
 
     def test_streaming_memory_and_images(self):
         calls = []
