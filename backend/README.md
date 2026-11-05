@@ -101,12 +101,30 @@ is held in process and resets when the backend restarts.
 When RAG is explicitly enabled, retrieved text is supplied as reference material
 for the assistant to use when relevant. Enabled MCP routes still take precedence
 for matching database queries. Existing RAG topics, MCP database schemas and
-keywords, and their specialized prompts remain unchanged. Image requests retain
-the agricultural image template and `qwen2.5vl:7b` model. Legacy agricultural
-text templates remain available but are no longer selected by ordinary text chat.
+keywords, and their specialized prompts remain unchanged. Legacy agricultural
+templates remain available but are no longer selected by ordinary text or image chat.
 
 Run backend regression tests from `backend/`:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```
+
+## General image conversations
+
+Attach images and ask about everyday objects, documents, screenshots, charts,
+or other visual content. Image requests use a neutral prompt and the existing
+`qwen2.5vl:7b` vision model; unclear visual details should be acknowledged.
+Install the model locally with `ollama pull qwen2.5vl:7b`.
+
+The frontend sends base64 images and uses one stable conversation ID for all
+text/image requests and context clearing during the mounted chat session.
+Image prompts include prior text exchanges exactly once. Image and text turns
+share conversation history, but **image bytes are not stored in backend memory**.
+Follow-ups can reference previous descriptions; reattach an image for renewed
+visual analysis. Reloading the frontend starts a new conversation.
+
+Image uploads and SSE streaming are unchanged. Image requests continue to bypass
+optional RAG/MCP routing. Browser upload accepts `image/*`; actual format support
+and readable detail depend on the vision model. Text-only requests continue to
+use `OLLAMA_TEXT_MODEL` (default `qwen3:4b-instruct`).

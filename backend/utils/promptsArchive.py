@@ -26,6 +26,19 @@ def get_general_text_prompt(query: str, history=None, rag_result=None) -> str:
     return "\n\n".join(sections)
 
 
+def get_general_image_prompt(query: str, history=None) -> str:
+    """Answer general image questions while retaining text conversation context."""
+    guidance = (
+        "Examine the attached images and answer the user's question about them. "
+        "You can discuss everyday objects, documents, screenshots, charts, and other images. "
+        "Distinguish visible evidence from inference. Do not invent details or unreadable text; "
+        "explain when visual information is unclear and ask for clarification if needed. "
+        "Prior conversation contains text only; do not claim to re-examine an earlier image "
+        "unless it is attached again."
+    )
+    return guidance + "\n\n" + get_general_text_prompt(query, history)
+
+
 def get_agriculture_prompt_without_image(
     history: str = "",
     query: str = "",
