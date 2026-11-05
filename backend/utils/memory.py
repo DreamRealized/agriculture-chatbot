@@ -1,9 +1,9 @@
 from typing import Any, Dict, List
 
-from langchain_core.memory import BaseMemory
-from pydantic import Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr
 
-class WindowedSummaryMemory(BaseMemory):
+# The chatbot calls this class directly; it does not use LangChain memory chains.
+class WindowedSummaryMemory(BaseModel):
     max_window: int = Field(default=10)
     memory_key: str = Field(default="history")
     _history: List[Dict[str, Any]] = PrivateAttr(default_factory=list)

@@ -1,3 +1,4 @@
+from env import OLLAMA_TEXT_MODEL
 from utils.models import generate_with_ollama, generate_with_ollama_stream
 from utils.promptsArchive import (END_KEYWORD, get_mcp_prompt,
                                   get_summary_prompt)
@@ -38,7 +39,7 @@ async def run_postgres_mcp_tool(user_query: str, context_list: list[str], rag_re
             summary_prompt = get_summary_prompt(user_query, context, rag_result)
             final_token = ""
             async for chunk in generate_with_ollama_stream(
-                prompt=summary_prompt, model="qwen3:32b"
+                prompt=summary_prompt, model=OLLAMA_TEXT_MODEL
             ):
                 token = (
                     str(chunk.get("response"))

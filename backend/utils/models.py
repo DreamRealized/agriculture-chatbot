@@ -2,11 +2,11 @@ import json
 import re
 
 import httpx
-from env import SERVER_INFO
+from env import OLLAMA_TEXT_MODEL, SERVER_INFO
 
 async def generate_with_ollama(
     prompt,
-    model="qwen3:32b",
+    model=OLLAMA_TEXT_MODEL,
     image=[],
     host=SERVER_INFO["host"],
     port=SERVER_INFO["port"],
@@ -36,7 +36,7 @@ async def generate_with_ollama(
 
 async def generate_with_ollama_stream(
     prompt,
-    model="qwen3",
+    model=OLLAMA_TEXT_MODEL,
     image=[],
     host=SERVER_INFO["host"],
     port=SERVER_INFO["port"],
