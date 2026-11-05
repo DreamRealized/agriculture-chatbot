@@ -1,3 +1,4 @@
+from env import OLLAMA_TEXT_MODEL
 import httpx
 from typing import Optional
 from utils.promptsArchive import get_rag_analysis_prompt, NO_RELATION
@@ -12,7 +13,7 @@ async def run_rag_analyzing(text: str, images: Optional[str] = None, top_k: int 
 
     prompt = get_rag_analysis_prompt(text)
     llm_reply = await generate_with_ollama(
-        model="qwen2.5vl:7b" if images else "qwen3:32b",
+        model="qwen2.5vl:7b" if images else OLLAMA_TEXT_MODEL,
         prompt=prompt,
         image=images,
     )

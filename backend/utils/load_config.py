@@ -1,5 +1,6 @@
 import json
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from typing import TypedDict, Dict, List, Union, Any
 
@@ -48,7 +49,7 @@ class ConfigObject:
 def load_config():
     global global_config
     try:
-        with open('config.jsonc', 'r') as f:
+        with (Path(__file__).resolve().parents[1] / 'config.jsonc').open(encoding='utf-8') as f:
             """Load JSON file with comments (// and /* */)"""
             content = f.read()
             

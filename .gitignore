@@ -1,1 +1,38 @@
 */.DS_store
+.DS_Store
+
+# Local Python environments and generated caches (at any depth)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local environment configuration; safe examples remain trackable
+.env
+.env.*
+!.env.example
+
+# Private credentials (avoid ignoring public certificates or general JSON files)
+.aws/credentials
+.aws/sso/cache/
+.aws/cli/cache/
+credentials.json
+service-account.json
+service-account-key.json
+*.private-key.pem
+*-private.pem
+private.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519

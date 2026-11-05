@@ -2,6 +2,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 
+from env import ENABLE_MCP, ENABLE_RAG, OLLAMA_TEXT_MODEL
 from utils.load_config import load_config
 
 # Load all global configs
@@ -12,8 +13,6 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from mcp_plugins.mcp_stream import get_mcp_client
-from mcp_plugins.postgres_mcp import run_postgres_mcp_tool
 from utils.memory import WindowedSummaryMemory
 from utils.models import generate_with_ollama_stream
 from utils.promptsArchive import (get_agriculture_prompt_with_image,
@@ -21,10 +20,19 @@ from utils.promptsArchive import (get_agriculture_prompt_with_image,
 from utils.user_memory import UserMemoryManager
 from utils.utils import (generate_sse_data, should_apply_enhanced_prompt,
                          should_use_mcp_plugin)
-from rag.rag import run_rag_analyzing, retrieveRAGResult
+if ENABLE_MCP:
+    from mcp_plugins.mcp_stream import get_mcp_client
+    from mcp_plugins.postgres_mcp import run_postgres_mcp_tool
+
+if ENABLE_RAG:
+    from rag.rag import run_rag_analyzing, retrieveRAGResult
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if not ENABLE_MCP:
+        yield
+        return
+
     client = get_mcp_client()
     # 异步上下文管理客户端连接
     async with client:
@@ -97,7 +105,7 @@ def generate_qwen3_prompt(
 
 @app.get("/clean_context/{chat_id}")
 async def clean_context(chat_id: str):
-    user_memory_manager.clean_memory(chat_id, "qwen3:32b")
+    user_memory_manager.clean_memory(chat_id, OLLAMA_TEXT_MODEL)
     user_memory_manager.clean_memory(chat_id, "qwen2.5vl:7b")
     return
 
@@ -116,14 +124,14 @@ async def analyze(request: Request):
             # Select model based on input
             # Keep the qwen instance temporarily
             # llm = qwen_model if images else qwen3_model
-            llm = "qwen3:32b"
+            llm = OLLAMA_TEXT_MODEL
             memory = user_memory_manager.get_memory(chat_id, llm)
 
             rag_result = []
             filtered_rag_result = []
 
             # 有图片时跳过 RAG，直接使用多模态模型 qwen2.5vl
-            if not images:
+            if ENABLE_RAG and not images:
                 async for chunk in run_rag_analyzing(
                     text=user_prompt,
                     images=images,
@@ -155,7 +163,7 @@ async def analyze(request: Request):
                     prompt = generate_qwenvl_prompt(user_prompt, memory, filtered_rag_result)
                 else:
                     postgres_mcp_context: list[str] = []
-                    if should_use_mcp_plugin(user_prompt):
+                    if ENABLE_MCP and should_use_mcp_plugin(user_prompt):
                         print("should use mcp----------")
                         async for item in run_postgres_mcp_tool(
                             user_prompt, postgres_mcp_context, filtered_rag_result
@@ -174,10 +182,19 @@ async def analyze(request: Request):
                             memory=memory,
                             rag_result=filtered_rag_result
                         )
+                    else:
+                        # Enhanced templates already include history; plain text needs it here.
+                        history = memory.load_memory_variables({}).get("history", [])
+                        if history:
+                            turns = "\n\n".join(
+                                f"User: {turn['input']}\nAssistant: {turn['output']}"
+                                for turn in history
+                            )
+                            prompt = f"Conversation history:\n{turns}\n\nCurrent request:\n{prompt}"
                 print("prompt------------------", prompt)
                 inside_think = False
                 async for chunk in generate_with_ollama_stream(
-                    model="qwen2.5vl:7b" if images else "qwen3:32b",
+                    model="qwen2.5vl:7b" if images else OLLAMA_TEXT_MODEL,
                     prompt=prompt,
                     image=images,
                 ):
