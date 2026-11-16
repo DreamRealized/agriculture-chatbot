@@ -34,9 +34,10 @@ async def generate_with_ollama(
     port=SERVER_INFO["port"],
 ):
     url = f"http://{host}:{port}/api/generate"
-    payload = {"model": model, "prompt": prompt, "images": image, "stream": False, "temperature": 0.2}
-    if image:
-        payload["options"] = {"num_ctx": 8192}
+    payload = {
+        "model": model, "prompt": prompt, "images": image, "stream": False,
+        "options": {"num_ctx": 8192, "temperature": 0.2},
+    }
 
     try:
         async with httpx.AsyncClient(timeout=None) as client:
@@ -65,9 +66,10 @@ async def generate_with_ollama_stream(
     port=SERVER_INFO["port"],
 ):
     url = f"http://{host}:{port}/api/generate"
-    payload = {"model": model, "prompt": prompt, "images": image, "stream": True, "temperature": 0.2}
-    if image:
-        payload["options"] = {"num_ctx": 8192}
+    payload = {
+        "model": model, "prompt": prompt, "images": image, "stream": True,
+        "options": {"num_ctx": 8192, "temperature": 0.2},
+    }
 
     async with httpx.AsyncClient(timeout=None, proxy=None) as client:
         async with client.stream("POST", url, json=payload) as response:

@@ -17,6 +17,42 @@ interface ChatInterfaceProps {
   multimodalModel: string;
 }
 
+interface MemoizedMessageProps {
+  msg: Message;
+  youLabel: string;
+  assistantLabel: string;
+  attachmentLabel: (number: number) => string;
+}
+
+const MemoizedMessage = React.memo(function MemoizedMessage({
+  msg,
+  youLabel,
+  assistantLabel,
+  attachmentLabel,
+}: MemoizedMessageProps) {
+  return (
+    <article
+      className={`chat-message chat-message--${msg.sender}`}
+      aria-label={msg.sender === "user" ? youLabel : assistantLabel}
+    >
+      <div className="chat-message-body">
+        {msg.images && msg.images.length > 0 && (
+          <div className="chat-message-images">
+            {msg.images.map((image, index) => (
+              <img
+                key={index}
+                src={image}
+                alt={attachmentLabel(index + 1)}
+              />
+            ))}
+          </div>
+        )}
+        <MarkdownRenderer content={msg.text} />
+      </div>
+    </article>
+  );
+});
+
 export const ChatInterface = ({
   defaultModel = "deepseek-r1:8b",
   multimodalModel = "qwen:2.5vl:7b"
@@ -31,6 +67,10 @@ export const ChatInterface = ({
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { t, i18n } = useTranslation();
+  const attachmentLabel = React.useCallback(
+    (number: number) => t("chat.attachment", { number }),
+    [t],
+  );
   const isChinese = i18n.language.startsWith("zh");
   const copy = {
     newChat: t("chat.newChat"), heading: t("chat.welcome"), subtitle: t("chat.welcomeSubtitle"),
@@ -237,21 +277,6 @@ export const ChatInterface = ({
     }
   };
 
-  const MemoizedMessage = React.memo(({ msg }: { msg: Message }) => (
-    <article className={`chat-message chat-message--${msg.sender}`} aria-label={msg.sender === "user" ? copy.you : copy.assistant}>
-      <div className="chat-message-body">
-        {msg.images && msg.images.length > 0 && (
-          <div className="chat-message-images">
-            {msg.images.map((image, index) => (
-              <img key={index} src={image} alt={t("chat.attachment", { number: index + 1 })} />
-            ))}
-          </div>
-        )}
-        <MarkdownRenderer content={msg.text} />
-      </div>
-    </article>
-  ));
-
   const cleanContext = React.useCallback(() => {
     setMessages([])
   }, [])
@@ -312,7 +337,15 @@ export const ChatInterface = ({
                 <p>{copy.subtitle}</p>
               </div>
             )}
-            {messages.map((msg, index) => <MemoizedMessage key={index} msg={msg} />)}
+            {messages.map((msg, index) => (
+              <MemoizedMessage
+                key={index}
+                msg={msg}
+                youLabel={copy.you}
+                assistantLabel={copy.assistant}
+                attachmentLabel={attachmentLabel}
+              />
+            ))}
             <div ref={messagesEndRef} />
           </div>
         </div>

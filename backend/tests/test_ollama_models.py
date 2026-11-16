@@ -22,7 +22,7 @@ class OllamaModelTests(unittest.IsolatedAsyncioTestCase):
                 return [item async for item in models.generate_with_ollama_stream(**kwargs)]
             return await models.generate_with_ollama(**kwargs)
 
-    async def test_vision_context_and_unchanged_text_payloads(self):
+    async def test_context_and_temperature_for_text_and_image_payloads(self):
         for streaming in (False, True):
             for images in ([], ['private-image-bytes']):
                 with self.subTest(streaming=streaming, images=bool(images)):
@@ -30,10 +30,10 @@ class OllamaModelTests(unittest.IsolatedAsyncioTestCase):
                         payload = json.loads(request.content)
                         expected = dict(model='qwen2.5vl:7b' if images else 'custom-text-model',
                                         prompt='private prompt', images=images,
-                                        stream=streaming, temperature=0.2)
-                        if images:
-                            expected['options'] = {'num_ctx': 8192}
+                                        stream=streaming,
+                                        options={'num_ctx': 8192, 'temperature': 0.2})
                         self.assertEqual(payload, expected)
+                        self.assertNotIn('temperature', payload)
                         return httpx.Response(200, content=b'{"response":"hello","done":false}\n{"done":true}\n'
                                               if streaming else b'{"response":"hello"}')
                     result = await self.call_helper(streaming, images, handler)
