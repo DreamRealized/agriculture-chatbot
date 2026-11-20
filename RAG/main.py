@@ -1,5 +1,6 @@
 import os
 from uuid import uuid4
+from functools import lru_cache
 
 import uvicorn
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
@@ -8,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from pipeline import (COLLECTION_NAME, CLIPEmbedder,
                     BgeEmbedder, client)
+from retrieval import search_text, format_search_results
 from qdrant_client.models import PointStruct, SearchParams
 from qdrant_client.http.models.models import QueryResponse
 from fastapi.responses import JSONResponse
@@ -31,7 +33,10 @@ app.add_middleware(
 
 text_embedder = BgeEmbedder()
 
-image_embedder = CLIPEmbedder()
+@lru_cache(maxsize=1)
+def get_image_embedder():
+    """Load CLIP only when an image operation needs it; reuse it thereafter."""
+    return CLIPEmbedder()
 
 UPLOAD_DIR = "./uploaded_images"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -47,7 +52,7 @@ async def embed_data(
         f.write(await image.read())
 
     text_vector = text_embedder.embed(text)
-    image_vector = image_embedder.embed(file_path)
+    image_vector = get_image_embedder().embed(file_path)
 
     point = PointStruct(
         id=uuid4().hex,
@@ -80,24 +85,15 @@ async def unified_multimodal_search(data: SearchRequest):
         image_base64 = data.image_base64
         top_k = data.top_k
 
-        # Remove the low similarity results
+        # Image matching keeps its existing threshold; text has separate configuration.
         score_threshold = 0.7
 
         # 文本查询
         if text:
-            text_vector = text_embedder.embed(text)
-            resp = client.query_points(
-                collection_name=COLLECTION_NAME,
-                query=text_vector,
-                limit=top_k,
-                with_payload=True,
-                with_vectors=False,  # set to True if you want vectors back
-                score_threshold=score_threshold,
-                search_params=SearchParams(hnsw_ef=128),
-                using="text"  # specify which named vector field to search
-            )
-            points = extract_scored_points(resp)
-            results.extend(points)
+            results.extend(search_text(
+                client=client, embedder=text_embedder, collection_name=COLLECTION_NAME,
+                text=text, top_k=top_k,
+            ))
 
         # 图像查询
         if image_base64:
@@ -105,7 +101,7 @@ async def unified_multimodal_search(data: SearchRequest):
                 image_bytes = base64.b64decode(format_base64(image_base64))
                 image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-                image_vector = image_embedder.embed_from_pil(image)
+                image_vector = get_image_embedder().embed_from_pil(image)
                 resp = client.query_points(
                     collection_name=COLLECTION_NAME,
                     query=image_vector,
@@ -123,49 +119,16 @@ async def unified_multimodal_search(data: SearchRequest):
                     payload = item.payload  # now you can access payload
                     if "text" in payload:
                         follow_up_query = payload["text"] + "的防治方法"
-                        text_vector = text_embedder.embed(follow_up_query)
-                        resp = client.query_points(
-                            collection_name=COLLECTION_NAME,
-                            query=text_vector,
-                            limit=top_k,
-                            with_payload=True,
-                            with_vectors=False,  # set to True if you want vectors back
-                            score_threshold=score_threshold,
-                            search_params=SearchParams(hnsw_ef=128),
-                            using="text"  # specify which named vector field to search
-                        )
-                        print("image text resp------------------", resp)
-                        points = extract_scored_points(resp)
-                        results.extend(points)
+                        results.extend(search_text(
+                            client=client, embedder=text_embedder, collection_name=COLLECTION_NAME,
+                            text=follow_up_query, top_k=top_k,
+                        ))
 
             except Exception as e:
                 print(e)
                 return JSONResponse(status_code=400, content={"base64图像解析失败": str(e)})
             
-        # 根据["text"]或["page_content"]合并相同内容
-        seen = set()
-        unique_results = []
-        for r in results:
-            print("res-----------------", r)
-            payload = r.payload  # now you can access payload
-            uid = payload.get("text") or payload.get("page_content")
-            if uid and uid not in seen:
-                unique_results.append(payload)
-                seen.add(uid)
-
-        # format keys
-        for result in unique_results:
-            if result.get("image_path"):
-                result["image"] = remove_path_prefix(result.pop("image_path"))
-                result["title"] = result.pop("text")
-                print("image: ------------", result["title"])
-            else:
-                result["title"] = result.pop("page_title")
-                result["content"] = result.pop("page_content")
-                print("text title: ------------", result["title"])
-                print("text content: ------------", result["content"])
-
-        return unique_results
+        return format_search_results(results)
 
     except Exception as e:
         print(e)

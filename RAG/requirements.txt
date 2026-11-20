@@ -1,10 +1,11 @@
 fastapi
 uuid
 uvicorn
-qdrant-client==1.15.0
+qdrant-client==1.20.0
 sentence-transformers
 transformers
 numpy
 torch
 torchvision
 Pillow
+python-multipart>=0.0.18
