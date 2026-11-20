@@ -117,32 +117,73 @@ async def analyze(request: Request):
 
             rag_result = []
             filtered_rag_result = []
+            classification = "unknown"
+            retrieval = "not_attempted"
 
             # 有图片时跳过 RAG，直接使用多模态模型 qwen2.5vl
             if ENABLE_RAG and not images:
-                async for chunk in run_rag_analyzing(
-                    text=user_prompt,
-                    images=images,
-                ):
-                    yield generate_sse_data(chunk)
-                    if chunk == "loading: rag_searching \n\n":
-                        print("使用 RAG 搜索")
-                        rag_result = await retrieveRAGResult(text=user_prompt)
+                try:
+                    async for chunk in run_rag_analyzing(
+                        text=user_prompt,
+                        images=images,
+                    ):
+                        yield generate_sse_data(chunk)
+                        if chunk == "loading: rag_searching \n\n":
+                            classification = "agricultural"
+                            retrieval = "failed"
+                            rag_result = await retrieveRAGResult(text=user_prompt)
+                            retrieval = "success" if rag_result else "empty"
+                        elif chunk == "loading: rag_no_relation \n\n":
+                            classification = "general"
 
-                rag_imgs = []
-                print("rag res: -----------", rag_result)
-                if len(rag_result) > 0:
-                    for res in rag_result:
-                        print("rag result----------------", res)
-                        if res.get("image"):
-                            rag_imgs.append(res)
-                if len(rag_imgs) > 0:
-                    yield generate_sse_data("**从知识库检索到下列相关图片:** \n\n")
-                    for img in rag_imgs:
-                        yield generate_sse_data(f"RAG image: {img['image']}, title: {img['title']} \n\n")
+                    rag_imgs = []
+                    print("rag res: -----------", rag_result)
+                    if len(rag_result) > 0:
+                        for res in rag_result:
+                            print("rag result----------------", res)
+                            if res.get("image"):
+                                rag_imgs.append(res)
+                    filtered_rag_result = [res for res in rag_result if not res.get("image")]
+                    if rag_imgs and filtered_rag_result:
+                        yield generate_sse_data("**从知识库检索到下列相关图片:** \n\n")
+                        for img in rag_imgs:
+                            yield generate_sse_data(f"RAG image: {img['image']}, title: {img['title']} \n\n")
 
-                filtered_rag_result = [res for res in rag_result if not res.get("image")]
-                print("filtered rag res: ---------", filtered_rag_result)
+                    print("filtered rag res: ---------", filtered_rag_result)
+
+                except Exception as error:
+                    rag_result = []
+                    filtered_rag_result = []
+                    retrieval = "failed" if classification == "agricultural" else "not_attempted"
+                    log_async(
+                        "WARNING", "RAG unavailable; using deterministic fallback",
+                        chat_id=chat_id, error_code="RAG_UNAVAILABLE",
+                        error_type=type(error).__name__,
+                    )
+                    yield generate_sse_data("loading: rag_unavailable \n\n")
+
+            if ENABLE_RAG and not images and (
+                classification == "unknown"
+                or (classification == "agricultural" and (
+                    retrieval != "success" or not filtered_rag_result
+                ))
+            ):
+                # Operational notices are not factual model answers: leave memory untouched.
+                if classification == "unknown":
+                    notice = (
+                        "I couldn't determine whether this question needs the agricultural "
+                        "knowledge base. Please rephrase or try again.\n\n"
+                        "无法确定此问题是否需要农业知识库，请换一种说法或稍后重试。"
+                    )
+                else:
+                    notice = (
+                        "I couldn't retrieve usable agricultural references, so I can't "
+                        "provide a grounded answer. Please try again later.\n\n"
+                        "未能检索到可用的农业参考资料，暂时无法提供有依据的回答，请稍后重试。"
+                    )
+                yield generate_sse_data(notice)
+                yield 'data: {"type": "done"}\n\n'
+                return
 
             try:
                 prompt = user_prompt
